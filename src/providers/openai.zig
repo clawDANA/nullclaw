@@ -225,13 +225,11 @@ pub const OpenAiProvider = struct {
             if (i > 0) try buf.append(allocator, ',');
             try buf.appendSlice(allocator, "{\"role\":\"");
             try buf.appendSlice(allocator, msg.role.toSlice());
-            try buf.appendSlice(allocator, "\",\"content\":\"");
-            try buf.appendSlice(allocator, msg.content);
-            try buf.append(allocator, '"');
+            try buf.appendSlice(allocator, "\",\"content\":");
+            try appendJsonString(&buf, allocator, msg.content);
             if (msg.tool_call_id) |tc_id| {
-                try buf.appendSlice(allocator, ",\"tool_call_id\":\"");
-                try buf.appendSlice(allocator, tc_id);
-                try buf.append(allocator, '"');
+                try buf.appendSlice(allocator, ",\"tool_call_id\":");
+                try appendJsonString(&buf, allocator, tc_id);
             }
             try buf.append(allocator, '}');
         }
@@ -250,6 +248,21 @@ pub const OpenAiProvider = struct {
         return try buf.toOwnedSlice(allocator);
     }
 };
+
+fn appendJsonString(buf: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, s: []const u8) !void {
+    try buf.append(allocator, '"');
+    for (s) |c| {
+        switch (c) {
+            '"' => try buf.appendSlice(allocator, "\\\""),
+            '\\' => try buf.appendSlice(allocator, "\\\\"),
+            '\n' => try buf.appendSlice(allocator, "\\n"),
+            '\r' => try buf.appendSlice(allocator, "\\r"),
+            '\t' => try buf.appendSlice(allocator, "\\t"),
+            else => try buf.append(allocator, c),
+        }
+    }
+    try buf.append(allocator, '"');
+}
 
 /// HTTP POST via curl subprocess.
 fn curlPost(allocator: std.mem.Allocator, url: []const u8, body: []const u8, auth_hdr: []const u8) ![]u8 {
