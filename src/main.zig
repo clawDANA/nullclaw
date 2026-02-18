@@ -658,7 +658,7 @@ fn runChannelStart(allocator: std.mem.Allocator, args: []const []const u8) !void
         std.process.exit(1);
     };
 
-    // Determine allowed users from args (--user <name>), default: allow all
+    // Determine allowed users: --user args > config allowed_users > allow all
     var user_list: std.ArrayList([]const u8) = .empty;
     defer user_list.deinit(allocator);
     {
@@ -671,7 +671,12 @@ fn runChannelStart(allocator: std.mem.Allocator, args: []const []const u8) !void
         }
     }
     const all = [_][]const u8{"*"};
-    const allowed: []const []const u8 = if (user_list.items.len > 0) user_list.items else &all;
+    const allowed: []const []const u8 = if (user_list.items.len > 0)
+        user_list.items
+    else if (telegram_config.allowed_users.len > 0)
+        telegram_config.allowed_users
+    else
+        &all;
 
     if (config.api_key == null) {
         std.debug.print("No API key in config. Add api_key to ~/.nullclaw/config.json\n", .{});
@@ -685,11 +690,11 @@ fn runChannelStart(allocator: std.mem.Allocator, args: []const []const u8) !void
     std.debug.print("  Provider: {s}\n", .{config.default_provider});
     std.debug.print("  Model: {s}\n", .{model});
     std.debug.print("  Temperature: {d:.1}\n", .{temperature});
-    if (user_list.items.len == 0) {
+    if (allowed.len == 1 and std.mem.eql(u8, allowed[0], "*")) {
         std.debug.print("  Allowed users: *\n", .{});
     } else {
         std.debug.print("  Allowed users:", .{});
-        for (user_list.items) |u| {
+        for (allowed) |u| {
             std.debug.print(" {s}", .{u});
         }
         std.debug.print("\n", .{});

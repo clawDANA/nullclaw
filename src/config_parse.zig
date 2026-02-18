@@ -667,6 +667,11 @@ pub fn parseJson(self: *Config, content: []const u8) !void {
                             self.channels.telegram = .{ .bot_token = try self.allocator.dupe(u8, tok.string) };
                         }
                     }
+                    if (self.channels.telegram) |*tg_cfg| {
+                        if (tg.object.get("allowed_users")) |v| {
+                            if (v == .array) tg_cfg.allowed_users = try parseStringArray(self.allocator, v.array);
+                        }
+                    }
                 }
             }
         }
