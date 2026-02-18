@@ -12,6 +12,12 @@
 
 const std = @import("std");
 const health = @import("health.zig");
+const Config = @import("config.zig").Config;
+const session_mod = @import("session.zig");
+const providers = @import("providers/root.zig");
+const tools_mod = @import("tools/root.zig");
+const memory_mod = @import("memory/root.zig");
+const observability = @import("observability.zig");
 
 /// Maximum request body size (64KB) — prevents memory exhaustion.
 pub const MAX_BODY_SIZE: usize = 65_536;
@@ -595,6 +601,76 @@ pub fn run(allocator: std.mem.Allocator, host: []const u8, port: u16) !void {
     var state = GatewayState.init(allocator);
     defer state.deinit();
 
+    // Load config and set up in-process SessionManager (graceful degradation if no config).
+    const config_opt: ?Config = Config.load(allocator) catch null;
+
+    // ProviderHolder: concrete provider struct must outlive the accept loop.
+    const ProviderHolder = union(enum) {
+        openrouter: providers.openrouter.OpenRouterProvider,
+        anthropic: providers.anthropic.AnthropicProvider,
+        openai: providers.openai.OpenAiProvider,
+        gemini: providers.gemini.GeminiProvider,
+        ollama: providers.ollama.OllamaProvider,
+    };
+
+    var holder_opt: ?ProviderHolder = null;
+    var session_mgr_opt: ?session_mod.SessionManager = null;
+    var tools_slice: []const tools_mod.Tool = &.{};
+    var mem_opt: ?memory_mod.Memory = null;
+
+    if (config_opt) |*cfg| {
+        // Build provider holder from configured provider name.
+        const api_key = cfg.api_key orelse "";
+        holder_opt = if (std.mem.eql(u8, cfg.default_provider, "anthropic"))
+            .{ .anthropic = providers.anthropic.AnthropicProvider.init(allocator, api_key, null) }
+        else if (std.mem.eql(u8, cfg.default_provider, "openai"))
+            .{ .openai = providers.openai.OpenAiProvider.init(allocator, api_key) }
+        else if (std.mem.eql(u8, cfg.default_provider, "gemini") or
+            std.mem.eql(u8, cfg.default_provider, "google"))
+            .{ .gemini = providers.gemini.GeminiProvider.init(allocator, api_key) }
+        else if (std.mem.eql(u8, cfg.default_provider, "ollama"))
+            .{ .ollama = providers.ollama.OllamaProvider.init(allocator, null) }
+        else
+            .{ .openrouter = providers.openrouter.OpenRouterProvider.init(allocator, api_key) };
+
+        // Build provider vtable from the holder.
+        if (holder_opt) |*h| {
+            const provider_i: providers.Provider = switch (h.*) {
+                .openrouter => |*p| p.provider(),
+                .anthropic => |*p| p.provider(),
+                .openai => |*p| p.provider(),
+                .gemini => |*p| p.provider(),
+                .ollama => |*p| p.provider(),
+            };
+
+            // Optional memory backend.
+            const db_path = std.fs.path.joinZ(allocator, &.{ cfg.workspace_dir, "memory.db" }) catch null;
+            defer if (db_path) |p| allocator.free(p);
+            if (db_path) |p| {
+                if (memory_mod.createMemory(allocator, cfg.memory.backend, p)) |mem| {
+                    mem_opt = mem;
+                } else |_| {}
+            }
+
+            // Tools.
+            tools_slice = tools_mod.allTools(allocator, cfg.workspace_dir, .{
+                .http_enabled = cfg.http_request.enabled,
+                .browser_enabled = cfg.browser.enabled,
+                .screenshot_enabled = true,
+                .agents = cfg.agents,
+                .fallback_api_key = cfg.api_key,
+            }) catch &.{};
+
+            // Noop observer.
+            var noop_obs = observability.NoopObserver{};
+            const obs = noop_obs.observer();
+
+            session_mgr_opt = session_mod.SessionManager.init(allocator, cfg, provider_i, tools_slice, mem_opt, obs);
+        }
+    }
+    defer if (session_mgr_opt) |*sm| sm.deinit();
+    defer if (tools_slice.len > 0) allocator.free(tools_slice);
+
     // Resolve the listen address
     const addr = try std.net.Address.resolveIp(host, port);
     var server = try addr.listen(.{
@@ -668,14 +744,19 @@ pub fn run(allocator: std.mem.Allocator, host: []const u8, port: u16) !void {
                 const body = extractBody(raw);
                 if (body) |b| {
                     const msg_text = jsonStringField(b, "message") orelse jsonStringField(b, "text") orelse b;
-                    if (processIncomingMessage(req_allocator, msg_text)) |resp| {
-                        const json_resp = std.fmt.allocPrint(req_allocator, "{{\"status\":\"ok\",\"response\":\"{s}\"}}", .{resp}) catch null;
-                        if (json_resp) |jr| {
-                            response_body = jr;
+                    if (session_mgr_opt) |*sm| {
+                        // Build session key using bearer token if available
+                        var sk_buf: [128]u8 = undefined;
+                        const session_key = std.fmt.bufPrint(&sk_buf, "webhook:{s}", .{bearer orelse "anon"}) catch "webhook:anon";
+                        const reply = sm.processMessage(session_key, msg_text) catch null;
+                        if (reply) |r| {
+                            defer allocator.free(r);
+                            const json_resp = std.fmt.allocPrint(req_allocator, "{{\"status\":\"ok\",\"response\":\"{s}\"}}", .{r}) catch null;
+                            response_body = json_resp orelse "{\"status\":\"received\"}";
                         } else {
                             response_body = "{\"status\":\"received\"}";
                         }
-                    } else |_| {
+                    } else {
                         response_body = "{\"status\":\"received\"}";
                     }
                 } else {
@@ -702,14 +783,22 @@ pub fn run(allocator: std.mem.Allocator, host: []const u8, port: u16) !void {
                     const chat_id = jsonIntField(b, "chat_id");
 
                     if (msg_text != null and chat_id != null) {
-                        // Process the message
-                        if (processIncomingMessage(req_allocator, msg_text.?)) |resp| {
-                            // Send reply back to Telegram
-                            if (state.telegram_bot_token.len > 0) {
-                                sendTelegramReply(req_allocator, state.telegram_bot_token, chat_id.?, resp) catch {};
+                        // Process the message in-process
+                        if (session_mgr_opt) |*sm| {
+                            var kb: [64]u8 = undefined;
+                            const sk = std.fmt.bufPrint(&kb, "telegram:{d}", .{chat_id.?}) catch "telegram:0";
+                            const reply = sm.processMessage(sk, msg_text.?) catch null;
+                            if (reply) |r| {
+                                defer allocator.free(r);
+                                // Send reply back to Telegram
+                                if (state.telegram_bot_token.len > 0) {
+                                    sendTelegramReply(req_allocator, state.telegram_bot_token, chat_id.?, r) catch {};
+                                }
+                                response_body = "{\"status\":\"ok\"}";
+                            } else {
+                                response_body = "{\"status\":\"received\"}";
                             }
-                            response_body = "{\"status\":\"ok\"}";
-                        } else |_| {
+                        } else {
                             response_body = "{\"status\":\"received\"}";
                         }
                     } else {
@@ -761,9 +850,15 @@ pub fn run(allocator: std.mem.Allocator, host: []const u8, port: u16) !void {
                     if (body) |b| {
                         const msg_text = jsonStringField(b, "text") orelse jsonStringField(b, "body");
                         if (msg_text) |mt| {
-                            if (processIncomingMessage(req_allocator, mt)) |resp| {
-                                response_body = resp;
-                            } else |_| {
+                            if (session_mgr_opt) |*sm| {
+                                const reply = sm.processMessage("whatsapp", mt) catch null;
+                                if (reply) |r| {
+                                    defer allocator.free(r);
+                                    response_body = req_allocator.dupe(u8, r) catch "{\"status\":\"received\"}";
+                                } else {
+                                    response_body = "{\"status\":\"received\"}";
+                                }
+                            } else {
                                 response_body = "{\"status\":\"received\"}";
                             }
                         } else {
@@ -778,9 +873,15 @@ pub fn run(allocator: std.mem.Allocator, host: []const u8, port: u16) !void {
                         // Try to extract message text from WhatsApp payload
                         const msg_text = jsonStringField(b, "text") orelse jsonStringField(b, "body");
                         if (msg_text) |mt| {
-                            if (processIncomingMessage(req_allocator, mt)) |resp| {
-                                response_body = resp;
-                            } else |_| {
+                            if (session_mgr_opt) |*sm| {
+                                const reply = sm.processMessage("whatsapp", mt) catch null;
+                                if (reply) |r| {
+                                    defer allocator.free(r);
+                                    response_body = req_allocator.dupe(u8, r) catch "{\"status\":\"received\"}";
+                                } else {
+                                    response_body = "{\"status\":\"received\"}";
+                                }
+                            } else {
                                 response_body = "{\"status\":\"received\"}";
                             }
                         } else {

@@ -770,17 +770,8 @@ fn runChannelStart(allocator: std.mem.Allocator, args: []const []const u8) !void
     std.debug.print("  Memory: {s}\n", .{if (mem_opt != null) "enabled" else "disabled"});
     std.debug.print("  Polling for messages... (Ctrl+C to stop)\n\n", .{});
 
-    // Per-chat persistent agent sessions: chat_id → *Agent
-    var sessions = std.StringHashMap(*yc.agent.Agent).init(allocator);
-    defer {
-        var it = sessions.iterator();
-        while (it.next()) |entry| {
-            entry.value_ptr.*.deinit();
-            allocator.destroy(entry.value_ptr.*);
-            allocator.free(entry.key_ptr.*);
-        }
-        sessions.deinit();
-    }
+    var session_mgr = yc.session.SessionManager.init(allocator, &config, provider_i, tools, mem_opt, obs);
+    defer session_mgr.deinit();
 
     // Bot loop: poll → full agent loop (tool calling) → reply
     while (true) {
@@ -793,28 +784,11 @@ fn runChannelStart(allocator: std.mem.Allocator, args: []const []const u8) !void
         for (messages) |msg| {
             std.debug.print("[{s}] {s}: {s}\n", .{ msg.channel, msg.id, msg.content });
 
-            // Get or create a persistent agent for this chat_id
-            const agent_ptr = sessions.get(msg.sender) orelse blk: {
-                const a = try allocator.create(yc.agent.Agent);
-                a.* = yc.agent.Agent.fromConfig(allocator, &config, provider_i, tools, mem_opt, obs) catch |err| {
-                    allocator.destroy(a);
-                    std.debug.print("  Agent init error: {}\n", .{err});
-                    tg.sendMessage(msg.sender, "Sorry, I encountered an error.") catch {};
-                    continue;
-                };
-                const key = try allocator.dupe(u8, msg.sender);
-                sessions.put(key, a) catch |err| {
-                    a.deinit();
-                    allocator.destroy(a);
-                    allocator.free(key);
-                    std.debug.print("  Session map error: {}\n", .{err});
-                    tg.sendMessage(msg.sender, "Sorry, I encountered an error.") catch {};
-                    continue;
-                };
-                break :blk a;
-            };
+            // Session key: "telegram:{chat_id}"
+            var key_buf: [128]u8 = undefined;
+            const session_key = std.fmt.bufPrint(&key_buf, "telegram:{s}", .{msg.sender}) catch msg.sender;
 
-            const reply = agent_ptr.turn(msg.content) catch |err| {
+            const reply = session_mgr.processMessage(session_key, msg.content) catch |err| {
                 std.debug.print("  Agent error: {}\n", .{err});
                 tg.sendMessage(msg.sender, "Sorry, I encountered an error.") catch |send_err| log.err("failed to send error reply: {}", .{send_err});
                 continue;
