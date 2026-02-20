@@ -153,7 +153,7 @@ test "shouldHydrate no memory no snapshot" {
 test "shouldHydrate with non-empty memory" {
     // Create an in-memory SQLite for test
     const sqlite = @import("sqlite.zig");
-    var mem_impl = try sqlite.SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem_impl = try sqlite.SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem_impl.deinit();
     const mem = mem_impl.memory();
 
@@ -166,7 +166,7 @@ test "shouldHydrate with non-empty memory" {
 
 test "exportSnapshot returns zero for empty memory" {
     const sqlite = @import("sqlite.zig");
-    var mem_impl = try sqlite.SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem_impl = try sqlite.SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem_impl.deinit();
     const mem = mem_impl.memory();
 

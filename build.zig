@@ -6,12 +6,8 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const app_version = b.option([]const u8, "version", "Version string embedded in the binary") orelse "2026.2.20";
 
-    const sqlite3_dep = b.dependency("sqlite3", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const sqlite3 = sqlite3_dep.artifact("sqlite3");
-    sqlite3.root_module.addCMacro("SQLITE_ENABLE_FTS5", "1");
+    // Link against system sqlcipher instead of static sqlite3
+    // sqlite3.root_module.addCMacro("SQLITE_ENABLE_FTS5", "1"); // usually enabled in sqlcipher builds
 
     var build_options = b.addOptions();
     build_options.addOption([]const u8, "version", app_version);
@@ -24,7 +20,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib_mod.addImport("build_options", build_options_module);
-    lib_mod.linkLibrary(sqlite3);
+    lib_mod.linkSystemLibrary("sqlcipher", .{});
+    lib_mod.link_libc = true;
 
     // ---------- executable ----------
     const exe = b.addExecutable(.{
@@ -40,8 +37,8 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("build_options", build_options_module);
 
-    // Link SQLite on the compile step (not the module)
-    exe.linkLibrary(sqlite3);
+    exe.linkSystemLibrary("sqlcipher");
+    exe.linkLibC();
     exe.dead_strip_dylibs = true;
 
     if (optimize != .Debug) {
@@ -70,7 +67,8 @@ pub fn build(b: *std.Build) void {
 
     // ---------- tests ----------
     const lib_tests = b.addTest(.{ .root_module = lib_mod });
-    lib_tests.linkLibrary(sqlite3);
+    lib_tests.linkSystemLibrary("sqlcipher");
+    lib_tests.linkLibC();
 
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
 

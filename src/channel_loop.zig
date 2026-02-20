@@ -140,7 +140,9 @@ pub const ChannelRuntime = struct {
         const db_path = std.fs.path.joinZ(allocator, &.{ config.workspace_dir, "memory.db" }) catch null;
         defer if (db_path) |p| allocator.free(p);
         if (db_path) |p| {
-            if (memory_mod.createMemory(allocator, config.memory.backend, p)) |mem| {
+            const db_key: ?[]const u8 = @import("security/root.zig").secrets.getDbKeyHex(allocator, config.workspace_dir) catch null;
+            defer if (db_key) |k| allocator.free(k);
+            if (memory_mod.createMemory(allocator, config.memory.backend, p, db_key)) |mem| {
                 mem_opt = mem;
             } else |_| {}
         }

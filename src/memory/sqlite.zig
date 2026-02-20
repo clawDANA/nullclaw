@@ -27,12 +27,29 @@ pub const SqliteMemory = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, db_path: [*:0]const u8) !Self {
+    pub fn init(allocator: std.mem.Allocator, db_path: [*:0]const u8, secret_key: ?[]const u8) !Self {
         var db: ?*c.sqlite3 = null;
         const rc = c.sqlite3_open(db_path, &db);
         if (rc != c.SQLITE_OK) {
             if (db) |d| _ = c.sqlite3_close(d);
             return error.SqliteOpenFailed;
+        }
+
+        if (secret_key) |key| {
+            // Set the SQLCipher encryption key using raw bytes passed as hex
+            const pragma = try std.fmt.allocPrint(allocator, "PRAGMA key = \"x'{s}'\";", .{key});
+            defer allocator.free(pragma);
+            
+            const pragma_z = try allocator.dupeZ(u8, pragma);
+            defer allocator.free(pragma_z);
+            
+            var err_msg: [*c]u8 = null;
+            const prc = c.sqlite3_exec(db, pragma_z.ptr, null, null, &err_msg);
+            if (prc != c.SQLITE_OK) {
+                if (err_msg) |msg| c.sqlite3_free(msg);
+                if (db) |d| _ = c.sqlite3_close(d);
+                return error.SqliteOpenFailed;
+            }
         }
 
         var self_ = Self{ .db = db, .allocator = allocator };
@@ -706,27 +723,27 @@ pub const SqliteMemory = struct {
 // ── Tests ──────────────────────────────────────────────────────────
 
 test "sqlite memory init with in-memory db" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     try mem.saveMessage("test-session", "user", "hello");
 }
 
 test "sqlite name" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
     try std.testing.expectEqualStrings("sqlite", m.name());
 }
 
 test "sqlite health check" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
     try std.testing.expect(m.healthCheck());
 }
 
 test "sqlite store and get" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -742,7 +759,7 @@ test "sqlite store and get" {
 }
 
 test "sqlite store upsert" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -759,7 +776,7 @@ test "sqlite store upsert" {
 }
 
 test "sqlite recall keyword" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -777,7 +794,7 @@ test "sqlite recall keyword" {
 }
 
 test "sqlite recall no match" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -790,7 +807,7 @@ test "sqlite recall no match" {
 }
 
 test "sqlite recall empty query" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -802,7 +819,7 @@ test "sqlite recall empty query" {
 }
 
 test "sqlite recall whitespace query" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -814,7 +831,7 @@ test "sqlite recall whitespace query" {
 }
 
 test "sqlite forget" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -827,7 +844,7 @@ test "sqlite forget" {
 }
 
 test "sqlite forget nonexistent" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -836,7 +853,7 @@ test "sqlite forget nonexistent" {
 }
 
 test "sqlite list all" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -850,7 +867,7 @@ test "sqlite list all" {
 }
 
 test "sqlite list by category" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -868,14 +885,14 @@ test "sqlite list by category" {
 }
 
 test "sqlite count empty" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
     try std.testing.expectEqual(@as(usize, 0), try m.count());
 }
 
 test "sqlite get nonexistent" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -884,7 +901,7 @@ test "sqlite get nonexistent" {
 }
 
 test "sqlite category roundtrip" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -911,7 +928,7 @@ test "sqlite category roundtrip" {
 }
 
 test "sqlite forget then recall no ghost results" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -924,7 +941,7 @@ test "sqlite forget then recall no ghost results" {
 }
 
 test "sqlite forget and re-store same key" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -939,7 +956,7 @@ test "sqlite forget and re-store same key" {
 }
 
 test "sqlite store empty content" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -950,7 +967,7 @@ test "sqlite store empty content" {
 }
 
 test "sqlite store empty key" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -961,7 +978,7 @@ test "sqlite store empty key" {
 }
 
 test "sqlite recall results have scores" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -977,7 +994,7 @@ test "sqlite recall results have scores" {
 }
 
 test "sqlite reindex" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -992,7 +1009,7 @@ test "sqlite reindex" {
 }
 
 test "sqlite recall with sql injection attempt" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1005,7 +1022,7 @@ test "sqlite recall with sql injection attempt" {
 }
 
 test "sqlite schema has fts5 table" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
 
     const sql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memories_fts'";
@@ -1021,7 +1038,7 @@ test "sqlite schema has fts5 table" {
 }
 
 test "sqlite fts5 syncs on insert" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1039,7 +1056,7 @@ test "sqlite fts5 syncs on insert" {
 }
 
 test "sqlite fts5 syncs on delete" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1058,7 +1075,7 @@ test "sqlite fts5 syncs on delete" {
 }
 
 test "sqlite fts5 syncs on update" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1089,7 +1106,7 @@ test "sqlite fts5 syncs on update" {
 }
 
 test "sqlite list custom category" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1103,7 +1120,7 @@ test "sqlite list custom category" {
 }
 
 test "sqlite list empty db" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1113,7 +1130,7 @@ test "sqlite list empty db" {
 }
 
 test "sqlite recall matches by key not just content" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1126,7 +1143,7 @@ test "sqlite recall matches by key not just content" {
 }
 
 test "sqlite recall respects limit" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1145,7 +1162,7 @@ test "sqlite recall respects limit" {
 }
 
 test "sqlite store unicode content" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1157,7 +1174,7 @@ test "sqlite store unicode content" {
 }
 
 test "sqlite recall unicode query" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1170,7 +1187,7 @@ test "sqlite recall unicode query" {
 }
 
 test "sqlite store long content" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1188,7 +1205,7 @@ test "sqlite store long content" {
 }
 
 test "sqlite multiple categories count" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1201,7 +1218,7 @@ test "sqlite multiple categories count" {
 }
 
 test "sqlite saveMessage stores messages" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
 
     try mem.saveMessage("session-1", "user", "hello");
@@ -1221,7 +1238,7 @@ test "sqlite saveMessage stores messages" {
 }
 
 test "sqlite store and forget multiple keys" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1240,7 +1257,7 @@ test "sqlite store and forget multiple keys" {
 }
 
 test "sqlite upsert changes category" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1254,7 +1271,7 @@ test "sqlite upsert changes category" {
 }
 
 test "sqlite recall multi-word query" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1269,7 +1286,7 @@ test "sqlite recall multi-word query" {
 }
 
 test "sqlite list returns all entries" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1297,7 +1314,7 @@ test "sqlite list returns all entries" {
 }
 
 test "sqlite get returns entry with all fields" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1314,7 +1331,7 @@ test "sqlite get returns entry with all fields" {
 }
 
 test "sqlite recall with quotes in query" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1327,7 +1344,7 @@ test "sqlite recall with quotes in query" {
 }
 
 test "sqlite health check after operations" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1338,7 +1355,7 @@ test "sqlite health check after operations" {
 }
 
 test "sqlite kv table exists" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
 
     const sql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='kv'";
@@ -1355,7 +1372,7 @@ test "sqlite kv table exists" {
 // ── Session ID tests ──────────────────────────────────────────────
 
 test "sqlite store with session_id persists" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1370,7 +1387,7 @@ test "sqlite store with session_id persists" {
 }
 
 test "sqlite store without session_id gives null" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1383,7 +1400,7 @@ test "sqlite store without session_id gives null" {
 }
 
 test "sqlite recall with session_id filters correctly" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1402,7 +1419,7 @@ test "sqlite recall with session_id filters correctly" {
 }
 
 test "sqlite recall with null session_id returns all" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1417,7 +1434,7 @@ test "sqlite recall with null session_id returns all" {
 }
 
 test "sqlite list with session_id filter" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1438,7 +1455,7 @@ test "sqlite list with session_id filter" {
 }
 
 test "sqlite list with session_id and category filter" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1454,7 +1471,7 @@ test "sqlite list with session_id and category filter" {
 }
 
 test "sqlite cross-session recall isolation" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1472,7 +1489,7 @@ test "sqlite cross-session recall isolation" {
 }
 
 test "sqlite schema has session_id column" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
 
     // Verify session_id column exists by querying it
@@ -1485,7 +1502,7 @@ test "sqlite schema has session_id column" {
 
 test "sqlite schema migration is idempotent" {
     // Calling migrateSessionId twice should not fail
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
 
     // migrateSessionId already ran during init; call it again
@@ -1502,7 +1519,7 @@ test "sqlite schema migration is idempotent" {
 // ── clearAutoSaved tests ──────────────────────────────────────────
 
 test "sqlite clearAutoSaved removes autosave entries" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1521,7 +1538,7 @@ test "sqlite clearAutoSaved removes autosave entries" {
 }
 
 test "sqlite clearAutoSaved preserves non-autosave entries" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
     const m = mem.memory();
 
@@ -1536,7 +1553,7 @@ test "sqlite clearAutoSaved preserves non-autosave entries" {
 }
 
 test "sqlite clearAutoSaved no-op on empty" {
-    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:");
+    var mem = try SqliteMemory.init(std.testing.allocator, ":memory:", null);
     defer mem.deinit();
 
     try mem.clearAutoSaved();

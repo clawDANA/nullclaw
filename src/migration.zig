@@ -81,7 +81,10 @@ pub fn migrateOpenclaw(
     const db_path = try std.fs.path.joinZ(allocator, &.{ config.workspace_dir, "memory.db" });
     defer allocator.free(db_path);
 
-    var mem = memory_root.createMemory(allocator, config.memory_backend, db_path) catch {
+    const db_key: ?[]const u8 = @import("security/root.zig").secrets.getDbKeyHex(allocator, config.workspace_dir) catch null;
+    defer if (db_key) |k| allocator.free(k);
+
+    var mem = memory_root.createMemory(allocator, config.memory_backend, db_path, db_key) catch {
         return error.TargetMemoryOpenFailed;
     };
     defer mem.deinit();

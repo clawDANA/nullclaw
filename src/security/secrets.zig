@@ -243,6 +243,21 @@ pub const SecretStore = struct {
     }
 };
 
+/// Get the database encryption key as a hex string.
+/// Checks NULLCLAW_DB_KEY environment variable first, then reads/creates
+/// the key in workspace_dir/.secret_key via SecretStore.
+pub fn getDbKeyHex(allocator: std.mem.Allocator, workspace_dir: []const u8) !?[]u8 {
+    if (std.process.getEnvVarOwned(allocator, "NULLCLAW_DB_KEY")) |env_key| {
+        return env_key;
+    } else |_| {}
+    
+    const store = SecretStore.init(workspace_dir, true);
+    const key_bytes = store.loadOrCreateKey() catch return null;
+    var hex_buf: [KEY_LEN * 2]u8 = undefined;
+    const encoded = hexEncode(&key_bytes, &hex_buf);
+    return try allocator.dupe(u8, encoded);
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────
 
 test "encrypt then decrypt roundtrip" {

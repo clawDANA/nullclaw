@@ -608,7 +608,7 @@ test "contentHash differs for different inputs" {
 }
 
 test "cacheEmbedding and getCachedEmbedding roundtrip" {
-    var mem = SqliteMemory.init(std.testing.allocator, ":memory:") catch return;
+    var mem = SqliteMemory.init(std.testing.allocator, ":memory:", null) catch return;
     defer mem.deinit();
 
     const embedding = [_]f32{ 0.1, 0.2, 0.3, -0.5 };
@@ -628,7 +628,7 @@ test "cacheEmbedding and getCachedEmbedding roundtrip" {
 }
 
 test "getCachedEmbedding returns null for missing hash" {
-    var mem = SqliteMemory.init(std.testing.allocator, ":memory:") catch return;
+    var mem = SqliteMemory.init(std.testing.allocator, ":memory:", null) catch return;
     defer mem.deinit();
 
     const cached = try getCachedEmbedding(&mem, "nonexistent_hash", std.testing.allocator);
@@ -636,7 +636,7 @@ test "getCachedEmbedding returns null for missing hash" {
 }
 
 test "cacheEmbedding overwrites existing entry" {
-    var mem = SqliteMemory.init(std.testing.allocator, ":memory:") catch return;
+    var mem = SqliteMemory.init(std.testing.allocator, ":memory:", null) catch return;
     defer mem.deinit();
 
     const hash = contentHash("overwrite test");
@@ -656,7 +656,7 @@ test "cacheEmbedding overwrites existing entry" {
 }
 
 test "pruneEmbeddingCache deletes oldest entries" {
-    var mem = SqliteMemory.init(std.testing.allocator, ":memory:") catch return;
+    var mem = SqliteMemory.init(std.testing.allocator, ":memory:", null) catch return;
     defer mem.deinit();
 
     // Insert 5 entries with distinct hashes
@@ -684,7 +684,7 @@ test "pruneEmbeddingCache deletes oldest entries" {
 }
 
 test "pruneEmbeddingCache returns 0 when under limit" {
-    var mem = SqliteMemory.init(std.testing.allocator, ":memory:") catch return;
+    var mem = SqliteMemory.init(std.testing.allocator, ":memory:", null) catch return;
     defer mem.deinit();
 
     const hash = contentHash("only one");
@@ -696,7 +696,7 @@ test "pruneEmbeddingCache returns 0 when under limit" {
 }
 
 test "cacheEmbedding empty vector" {
-    var mem = SqliteMemory.init(std.testing.allocator, ":memory:") catch return;
+    var mem = SqliteMemory.init(std.testing.allocator, ":memory:", null) catch return;
     defer mem.deinit();
 
     const hash = contentHash("empty vec");

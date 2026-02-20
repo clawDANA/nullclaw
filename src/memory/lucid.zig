@@ -38,9 +38,9 @@ pub const LucidMemory = struct {
     const DEFAULT_LOCAL_HIT_THRESHOLD: usize = 3;
     const DEFAULT_FAILURE_COOLDOWN_MS: u64 = 15_000;
 
-    pub fn init(allocator: std.mem.Allocator, db_path: [*:0]const u8, workspace_dir: []const u8) !Self {
+    pub fn init(allocator: std.mem.Allocator, db_path: [*:0]const u8, workspace_dir: []const u8, secret_key: ?[]const u8) !Self {
         return Self{
-            .local = try root.SqliteMemory.init(allocator, db_path),
+            .local = try root.SqliteMemory.init(allocator, db_path, secret_key),
             .allocator = allocator,
             .lucid_cmd = DEFAULT_LUCID_CMD,
             .workspace_dir = workspace_dir,
@@ -57,6 +57,7 @@ pub const LucidMemory = struct {
     pub fn initWithOptions(
         allocator: std.mem.Allocator,
         db_path: [*:0]const u8,
+        secret_key: ?[]const u8,
         lucid_cmd: []const u8,
         workspace_dir: []const u8,
         token_budget: usize,
@@ -64,7 +65,7 @@ pub const LucidMemory = struct {
         failure_cooldown_ms: u64,
     ) !Self {
         return Self{
-            .local = try root.SqliteMemory.init(allocator, db_path),
+            .local = try root.SqliteMemory.init(allocator, db_path, secret_key),
             .allocator = allocator,
             .lucid_cmd = lucid_cmd,
             .workspace_dir = workspace_dir,
@@ -473,6 +474,7 @@ test "lucid memory name" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -489,6 +491,7 @@ test "lucid store succeeds when lucid binary missing" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -512,6 +515,7 @@ test "lucid recall returns local results when lucid unavailable" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -534,6 +538,7 @@ test "lucid list delegates to local" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -560,6 +565,7 @@ test "lucid forget delegates to local" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -582,6 +588,7 @@ test "lucid count delegates to local" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -601,6 +608,7 @@ test "lucid health check delegates to local" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -617,6 +625,7 @@ test "lucid failure cooldown is set on lucid failure" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -643,6 +652,7 @@ test "lucid clearFailure resets cooldown" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -754,6 +764,7 @@ test "lucid recall skips lucid when local hits meet threshold" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -788,6 +799,7 @@ test "lucid store accepts session_id" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -812,6 +824,7 @@ test "lucid recall accepts session_id" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,
@@ -834,6 +847,7 @@ test "lucid list accepts session_id" {
     var mem = try LucidMemory.initWithOptions(
         allocator,
         ":memory:",
+        null,
         "nonexistent-lucid-binary",
         "/tmp/test",
         200,

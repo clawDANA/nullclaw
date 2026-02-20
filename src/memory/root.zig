@@ -256,13 +256,13 @@ pub const CreateError = error{
 /// For sqlite, pass the db_path (e.g. ":memory:" for tests, or a file path).
 /// For markdown, pass workspace_dir as the path.
 /// For none, path is ignored.
-pub fn createMemory(allocator: std.mem.Allocator, backend_name: []const u8, path: [*:0]const u8) !Memory {
+pub fn createMemory(allocator: std.mem.Allocator, backend_name: []const u8, path: [*:0]const u8, secret_key: ?[]const u8) !Memory {
     const kind = classifyBackend(backend_name);
     return switch (kind) {
         .sqlite_backend => {
             const impl_ = try allocator.create(SqliteMemory);
             errdefer allocator.destroy(impl_);
-            impl_.* = try SqliteMemory.init(allocator, path);
+            impl_.* = try SqliteMemory.init(allocator, path, secret_key);
             return impl_.memory();
         },
         .markdown_backend => {
@@ -274,7 +274,7 @@ pub fn createMemory(allocator: std.mem.Allocator, backend_name: []const u8, path
         .lucid_backend => {
             const impl_ = try allocator.create(LucidMemory);
             errdefer allocator.destroy(impl_);
-            impl_.* = try LucidMemory.init(allocator, path, std.mem.span(path));
+            impl_.* = try LucidMemory.init(allocator, path, std.mem.span(path), secret_key);
             return impl_.memory();
         },
         .none_backend => {

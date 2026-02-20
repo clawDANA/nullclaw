@@ -782,7 +782,9 @@ fn runChannelStart(allocator: std.mem.Allocator, args: []const []const u8) !void
     const db_path = std.fs.path.joinZ(allocator, &.{ config.workspace_dir, "memory.db" }) catch null;
     defer if (db_path) |p| allocator.free(p);
     if (db_path) |p| {
-        if (yc.memory.createMemory(allocator, config.memory.backend, p)) |mem| {
+        const db_key: ?[]const u8 = yc.security.secrets.getDbKeyHex(allocator, config.workspace_dir) catch null;
+        defer if (db_key) |k| allocator.free(k);
+        if (yc.memory.createMemory(allocator, config.memory.backend, p, db_key)) |mem| {
             mem_opt = mem;
         } else |_| {}
     }

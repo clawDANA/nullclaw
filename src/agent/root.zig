@@ -1184,7 +1184,9 @@ pub fn run(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     var mem_opt: ?Memory = null;
     const db_path = try std.fs.path.joinZ(allocator, &.{ cfg.workspace_dir, "memory.db" });
     defer allocator.free(db_path);
-    if (memory_mod.createMemory(allocator, cfg.memory.backend, db_path)) |mem| {
+    const db_key: ?[]const u8 = @import("../security/root.zig").secrets.getDbKeyHex(allocator, cfg.workspace_dir) catch null;
+    defer if (db_key) |k| allocator.free(k);
+    if (memory_mod.createMemory(allocator, cfg.memory.backend, db_path, db_key)) |mem| {
         mem_opt = mem;
     } else |_| {}
 
